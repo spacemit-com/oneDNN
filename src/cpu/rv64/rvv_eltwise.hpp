@@ -1,5 +1,6 @@
 /*******************************************************************************
 * Copyright 2025 ZTE Corporation
+* Copyright 2026 SpacemiT Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -73,7 +74,21 @@ struct rvv_eltwise_fwd_t : public primitive_t {
         bool use_dense_;
 
         bool check_alg_kind() const {
-            return utils::one_of(desc()->alg_kind, alg_kind::eltwise_relu,
+            const auto alg = desc()->alg_kind;
+            using namespace dnnl::impl::data_type;
+            if (utils::one_of(dst_md()->data_type, f32, f16)) {
+                return utils::one_of(alg, alg_kind::eltwise_relu,
+                        alg_kind::eltwise_square, alg_kind::eltwise_abs,
+                        alg_kind::eltwise_sqrt, alg_kind::eltwise_linear,
+                        alg_kind::eltwise_clip, alg_kind::eltwise_hardsigmoid,
+                        alg_kind::eltwise_hardswish, alg_kind::eltwise_tanh,
+                        alg_kind::eltwise_logistic, alg_kind::eltwise_round,
+                        alg_kind::eltwise_swish, alg_kind::eltwise_elu,
+                        alg_kind::eltwise_gelu_tanh, alg_kind::eltwise_gelu_erf,
+                        alg_kind::eltwise_exp);
+            }
+
+            return utils::one_of(alg, alg_kind::eltwise_relu,
                     alg_kind::eltwise_square, alg_kind::eltwise_abs,
                     alg_kind::eltwise_sqrt, alg_kind::eltwise_linear,
                     alg_kind::eltwise_clip, alg_kind::eltwise_hardsigmoid,

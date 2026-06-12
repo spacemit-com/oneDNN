@@ -1,6 +1,7 @@
 /*******************************************************************************
 * Copyright 2026 Institute of Software, Chinese Academy of Sciences
 * Copyright 2026 openKylin community
+* Copyright 2026 SpacemiT Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -26,6 +27,8 @@ namespace impl {
 namespace cpu {
 namespace rv64 {
 
+struct eltwise_aux_regs_t;
+
 struct jit_rvv_eltwise_fwd_kernel_t : public jit_generator_t {
     struct call_params_t {
         const float *src;
@@ -47,10 +50,8 @@ protected:
     void generate() override;
 
 private:
-    void compute_vector(const Xbyak_riscv::VReg &v_dst,
-            const Xbyak_riscv::VReg &v_src, const Xbyak_riscv::VReg &v_tmp,
-            const Xbyak_riscv::FReg &f_alpha, const Xbyak_riscv::FReg &f_beta,
-            const Xbyak_riscv::FReg &f_zero, const Xbyak_riscv::FReg &f_one);
+    void compute_vector(const eltwise_aux_regs_t &r,
+            const Xbyak_riscv::VReg &v_dst, const Xbyak_riscv::VReg &v_src);
 
     alg_kind_t alg_;
 };
@@ -84,10 +85,8 @@ protected:
     void generate() override;
 
 private:
-    void compute_vector(const Xbyak_riscv::VReg &v_dst,
-            const Xbyak_riscv::VReg &v_src, const Xbyak_riscv::VReg &v_tmp,
-            const Xbyak_riscv::FReg &f_alpha, const Xbyak_riscv::FReg &f_beta,
-            const Xbyak_riscv::FReg &f_zero, const Xbyak_riscv::FReg &f_one);
+    void compute_vector(const eltwise_aux_regs_t &r,
+            const Xbyak_riscv::VReg &v_dst, const Xbyak_riscv::VReg &v_src);
 
     alg_kind_t alg_;
 };

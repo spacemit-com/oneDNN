@@ -1,6 +1,7 @@
 /*******************************************************************************
 * Copyright 2026 Institute of Software, Chinese Academy of Sciences
 * Copyright 2026 openKylin community
+* Copyright 2026 SpacemiT Corporation
 *
 * Licensed under the Apache License, Version 2.0 (the "License");
 * you may not use this file except in compliance with the License.
@@ -18,6 +19,7 @@
 #include <assert.h>
 
 #include "cpu/rv64/jit_rvv_eltwise_kernel.hpp"
+#include "cpu/rv64/jit_rvv_eltwise_emitter.hpp"
 
 namespace dnnl {
 namespace impl {
@@ -65,7 +67,15 @@ bool jit_rvv_eltwise_f32_supported(alg_kind_t alg) {
         case alg_kind::eltwise_linear:
         case alg_kind::eltwise_relu:
         case alg_kind::eltwise_sqrt:
-        case alg_kind::eltwise_square: return true;
+        case alg_kind::eltwise_square:
+        case alg_kind::eltwise_round:
+        case alg_kind::eltwise_tanh:
+        case alg_kind::eltwise_logistic:
+        case alg_kind::eltwise_swish:
+        case alg_kind::eltwise_elu:
+        case alg_kind::eltwise_gelu_tanh:
+        case alg_kind::eltwise_gelu_erf:
+        case alg_kind::eltwise_exp: return true;
         default: return false;
     }
 }
@@ -99,49 +109,61 @@ void jit_rvv_eltwise_apply_f32(alg_kind_t alg, const float *src, float *dst,
         case alg_kind::eltwise_square:
             dispatch_jit_eltwise_f32<alg_kind::eltwise_square>(&p);
             break;
+        case alg_kind::eltwise_tanh:
+            dispatch_jit_eltwise_f32<alg_kind::eltwise_tanh>(&p);
+            break;
+        case alg_kind::eltwise_logistic:
+            dispatch_jit_eltwise_f32<alg_kind::eltwise_logistic>(&p);
+            break;
+        case alg_kind::eltwise_round:
+            dispatch_jit_eltwise_f32<alg_kind::eltwise_round>(&p);
+            break;
+        case alg_kind::eltwise_swish:
+            dispatch_jit_eltwise_f32<alg_kind::eltwise_swish>(&p);
+            break;
+        case alg_kind::eltwise_elu:
+            dispatch_jit_eltwise_f32<alg_kind::eltwise_elu>(&p);
+            break;
+        case alg_kind::eltwise_gelu_tanh:
+            dispatch_jit_eltwise_f32<alg_kind::eltwise_gelu_tanh>(&p);
+            break;
+        case alg_kind::eltwise_gelu_erf:
+            dispatch_jit_eltwise_f32<alg_kind::eltwise_gelu_erf>(&p);
+            break;
+        case alg_kind::eltwise_exp:
+            dispatch_jit_eltwise_f32<alg_kind::eltwise_exp>(&p);
+            break;
         default: assert(!"unsupported f32 eltwise JIT alg");
     }
 }
 
-void jit_rvv_eltwise_fwd_kernel_t::compute_vector(const VReg &v_dst,
-        const VReg &v_src, const VReg &v_tmp, const FReg &f_alpha,
-        const FReg &f_beta, const FReg &f_zero, const FReg &f_one) {
+void jit_rvv_eltwise_fwd_kernel_t::compute_vector(
+        const eltwise_aux_regs_t &r, const VReg &v_dst, const VReg &v_src) {
 #if defined(XBYAK_RISCV_V) && XBYAK_RISCV_V == 1
-    const VReg v_mask(0);
+    jit_rvv_eltwise_fwd_emitter_t elt(this);
     switch (alg_) {
-        case alg_kind::eltwise_abs: vfabs_v(v_dst, v_src); break;
-        case alg_kind::eltwise_clip:
-            vfmax_vf(v_dst, v_src, f_alpha);
-            vfmin_vf(v_dst, v_dst, f_beta);
-            break;
+        case alg_kind::eltwise_abs: elt.abs(r, v_dst, v_src); break;
+        case alg_kind::eltwise_clip: elt.clip(r, v_dst, v_src); break;
         case alg_kind::eltwise_hardsigmoid:
-            vfmul_vf(v_dst, v_src, f_alpha);
-            vfadd_vf(v_dst, v_dst, f_beta);
-            vfmax_vf(v_dst, v_dst, f_zero);
-            vfmin_vf(v_dst, v_dst, f_one);
+            elt.hardsigmoid(r, v_dst, v_src);
             break;
-        case alg_kind::eltwise_hardswish:
-            vfmul_vf(v_tmp, v_src, f_alpha);
-            vfadd_vf(v_tmp, v_tmp, f_beta);
-            vfmax_vf(v_tmp, v_tmp, f_zero);
-            vfmin_vf(v_tmp, v_tmp, f_one);
-            vfmul_vv(v_dst, v_src, v_tmp);
-            break;
-        case alg_kind::eltwise_linear:
-            vfmul_vf(v_dst, v_src, f_alpha);
-            vfadd_vf(v_dst, v_dst, f_beta);
-            break;
-        case alg_kind::eltwise_relu:
-            vmfgt_vf(v_mask, v_src, f_zero);
-            vfmul_vf(v_tmp, v_src, f_alpha);
-            vmerge_vvm(v_dst, v_tmp, v_src);
-            break;
-        case alg_kind::eltwise_sqrt: vfsqrt_v(v_dst, v_src); break;
-        case alg_kind::eltwise_square: vfmul_vv(v_dst, v_src, v_src); break;
-        default: assert(!"unsupported f32 eltwise JIT alg");
+        case alg_kind::eltwise_hardswish: elt.hardswish(r, v_dst, v_src); break;
+        case alg_kind::eltwise_linear: elt.linear(r, v_dst, v_src); break;
+        case alg_kind::eltwise_relu: elt.relu(r, v_dst, v_src); break;
+        case alg_kind::eltwise_sqrt: elt.sqrt(r, v_dst, v_src); break;
+        case alg_kind::eltwise_square: elt.square(r, v_dst, v_src); break;
+        case alg_kind::eltwise_round: elt.round(r, v_dst, v_src); break;
+        case alg_kind::eltwise_tanh: elt.tanh(r, v_dst, v_src); break;
+        case alg_kind::eltwise_logistic: elt.sigmoid(r, v_dst, v_src); break;
+        case alg_kind::eltwise_swish: elt.swish(r, v_dst, v_src); break;
+        case alg_kind::eltwise_elu: elt.elu(r, v_dst, v_src); break;
+        case alg_kind::eltwise_gelu_tanh: elt.gelu_tanh(r, v_dst, v_src); break;
+        case alg_kind::eltwise_gelu_erf: elt.gelu_erf(r, v_dst, v_src); break;
+        case alg_kind::eltwise_exp: elt.exp(r, v_dst, v_src); break;
+        default: assert(!"unsupported eltwise fwd JIT alg");
     }
 #else
-    UNUSED(v_dst, v_src, v_tmp, f_alpha, f_beta, f_zero, f_one);
+    UNUSED(r, v_dst, v_src);
 #endif
 }
 
@@ -153,16 +175,23 @@ void jit_rvv_eltwise_fwd_kernel_t::generate() {
     const Reg reg_len = a3;
     const Reg reg_vl = t0;
     const Reg reg_bytes = t1;
-    const Reg reg_tmp = t2;
 
     const FReg f_alpha = fa0;
     const FReg f_beta = fa1;
     const FReg f_zero = fa2;
     const FReg f_one = fa3;
+    const FReg f_tmp0 = fa4;
+    const FReg f_tmp1 = fa5;
 
     const VReg v_src(4);
-    const VReg v_tmp(8);
+    const VReg v_tmp0(8);
     const VReg v_dst(12);
+    const VReg v_tmp1(16);
+    const VReg v_tmp2(20);
+    const VReg v_tmp3(24);
+
+    const eltwise_aux_regs_t regs {v_tmp0, v_tmp1, v_tmp2, v_tmp3, f_alpha,
+            f_beta, f_zero, f_one, f_tmp0, f_tmp1, t2, t3};
 
     ld(reg_src, reg_param, 0);
     ld(reg_dst, reg_param, 8);
@@ -170,15 +199,15 @@ void jit_rvv_eltwise_fwd_kernel_t::generate() {
     flw(f_alpha, reg_param, 24);
     flw(f_beta, reg_param, 28);
     fmv_w_x(f_zero, x0);
-    li(reg_tmp, 0x3f800000);
-    fmv_w_x(f_one, reg_tmp);
+    li(regs.tmp_reg0, 0x3f800000);
+    fmv_w_x(f_one, regs.tmp_reg0);
 
     Label loop, done;
     L(loop);
     beqz(reg_len, done);
     vsetvli(reg_vl, reg_len, SEW::e32, LMUL::m4);
     vle32_v(v_src, reg_src);
-    compute_vector(v_dst, v_src, v_tmp, f_alpha, f_beta, f_zero, f_one);
+    compute_vector(regs, v_dst, v_src);
     vse32_v(v_dst, reg_dst);
     slli(reg_bytes, reg_vl, 2);
     add(reg_src, reg_src, reg_bytes);
@@ -212,7 +241,15 @@ bool jit_rvv_eltwise_fwd_f16_supported(alg_kind_t alg) {
         case alg_kind::eltwise_linear:
         case alg_kind::eltwise_relu:
         case alg_kind::eltwise_sqrt:
-        case alg_kind::eltwise_square: return true;
+        case alg_kind::eltwise_square:
+        case alg_kind::eltwise_round:
+        case alg_kind::eltwise_tanh:
+        case alg_kind::eltwise_logistic:
+        case alg_kind::eltwise_swish:
+        case alg_kind::eltwise_elu:
+        case alg_kind::eltwise_gelu_tanh:
+        case alg_kind::eltwise_gelu_erf:
+        case alg_kind::eltwise_exp: return true;
         default: return false;
     }
 }
@@ -246,51 +283,61 @@ void jit_rvv_eltwise_apply_fwd_f16(alg_kind_t alg, const void *src, void *dst,
         case alg_kind::eltwise_square:
             dispatch_jit_eltwise_fwd_f16<alg_kind::eltwise_square>(&p);
             break;
+        case alg_kind::eltwise_tanh:
+            dispatch_jit_eltwise_fwd_f16<alg_kind::eltwise_tanh>(&p);
+            break;
+        case alg_kind::eltwise_logistic:
+            dispatch_jit_eltwise_fwd_f16<alg_kind::eltwise_logistic>(&p);
+            break;
+        case alg_kind::eltwise_round:
+            dispatch_jit_eltwise_fwd_f16<alg_kind::eltwise_round>(&p);
+            break;
+        case alg_kind::eltwise_swish:
+            dispatch_jit_eltwise_fwd_f16<alg_kind::eltwise_swish>(&p);
+            break;
+        case alg_kind::eltwise_elu:
+            dispatch_jit_eltwise_fwd_f16<alg_kind::eltwise_elu>(&p);
+            break;
+        case alg_kind::eltwise_gelu_tanh:
+            dispatch_jit_eltwise_fwd_f16<alg_kind::eltwise_gelu_tanh>(&p);
+            break;
+        case alg_kind::eltwise_gelu_erf:
+            dispatch_jit_eltwise_fwd_f16<alg_kind::eltwise_gelu_erf>(&p);
+            break;
+        case alg_kind::eltwise_exp:
+            dispatch_jit_eltwise_fwd_f16<alg_kind::eltwise_exp>(&p);
+            break;
         default: assert(!"unsupported f16 eltwise fwd JIT alg");
     }
 }
 
-void jit_rvv_eltwise_fwd_kernel_f16_t::compute_vector(const VReg &v_dst,
-        const VReg &v_src, const VReg &v_tmp, const FReg &f_alpha,
-        const FReg &f_beta, const FReg &f_zero, const FReg &f_one) {
+void jit_rvv_eltwise_fwd_kernel_f16_t::compute_vector(
+        const eltwise_aux_regs_t &r, const VReg &v_dst, const VReg &v_src) {
 #if defined(XBYAK_RISCV_V) && XBYAK_RISCV_V == 1
-    // Compute runs at SEW=e32, LMUL=m4 — same operands and shape as the
-    // upstream f32 eltwise kernel, since the widening makes v_src an f32 group.
-    const VReg v_mask(0);
+    jit_rvv_eltwise_fwd_emitter_t elt(this);
     switch (alg_) {
-        case alg_kind::eltwise_abs: vfabs_v(v_dst, v_src); break;
-        case alg_kind::eltwise_clip:
-            vfmax_vf(v_dst, v_src, f_alpha);
-            vfmin_vf(v_dst, v_dst, f_beta);
-            break;
+        case alg_kind::eltwise_abs: elt.abs(r, v_dst, v_src); break;
+        case alg_kind::eltwise_clip: elt.clip(r, v_dst, v_src); break;
         case alg_kind::eltwise_hardsigmoid:
-            vfmul_vf(v_dst, v_src, f_alpha);
-            vfadd_vf(v_dst, v_dst, f_beta);
-            vfmax_vf(v_dst, v_dst, f_zero);
-            vfmin_vf(v_dst, v_dst, f_one);
+            elt.hardsigmoid(r, v_dst, v_src);
             break;
-        case alg_kind::eltwise_hardswish:
-            vfmul_vf(v_tmp, v_src, f_alpha);
-            vfadd_vf(v_tmp, v_tmp, f_beta);
-            vfmax_vf(v_tmp, v_tmp, f_zero);
-            vfmin_vf(v_tmp, v_tmp, f_one);
-            vfmul_vv(v_dst, v_src, v_tmp);
-            break;
-        case alg_kind::eltwise_linear:
-            vfmul_vf(v_dst, v_src, f_alpha);
-            vfadd_vf(v_dst, v_dst, f_beta);
-            break;
-        case alg_kind::eltwise_relu:
-            vmfgt_vf(v_mask, v_src, f_zero);
-            vfmul_vf(v_tmp, v_src, f_alpha);
-            vmerge_vvm(v_dst, v_tmp, v_src);
-            break;
-        case alg_kind::eltwise_sqrt: vfsqrt_v(v_dst, v_src); break;
-        case alg_kind::eltwise_square: vfmul_vv(v_dst, v_src, v_src); break;
-        default: assert(!"unsupported f16 eltwise fwd JIT alg");
+        case alg_kind::eltwise_hardswish: elt.hardswish(r, v_dst, v_src); break;
+        case alg_kind::eltwise_linear: elt.linear(r, v_dst, v_src); break;
+        case alg_kind::eltwise_relu: elt.relu(r, v_dst, v_src); break;
+        case alg_kind::eltwise_sqrt: elt.sqrt(r, v_dst, v_src); break;
+        case alg_kind::eltwise_square: elt.square(r, v_dst, v_src); break;
+        case alg_kind::eltwise_round: elt.round(r, v_dst, v_src); break;
+        case alg_kind::eltwise_tanh: elt.tanh(r, v_dst, v_src); break;
+        case alg_kind::eltwise_logistic: elt.sigmoid(r, v_dst, v_src); break;
+        case alg_kind::eltwise_swish: elt.swish(r, v_dst, v_src); break;
+        case alg_kind::eltwise_elu: elt.elu(r, v_dst, v_src); break;
+        case alg_kind::eltwise_gelu_tanh: elt.gelu_tanh(r, v_dst, v_src); break;
+        case alg_kind::eltwise_gelu_erf: elt.gelu_erf(r, v_dst, v_src); break;
+        case alg_kind::eltwise_exp: elt.exp(r, v_dst, v_src); break;
+        default: assert(!"unsupported eltwise fwd JIT alg");
     }
 #else
-    UNUSED(v_dst, v_src, v_tmp, f_alpha, f_beta, f_zero, f_one);
+    UNUSED(r, v_dst, v_src);
 #endif
 }
 
@@ -302,24 +349,34 @@ void jit_rvv_eltwise_fwd_kernel_f16_t::generate() {
     const Reg reg_len = a3;
     const Reg reg_vl = t0;
     const Reg reg_bytes = t1;
-    const Reg reg_tmp = t2;
 
     const FReg f_alpha = fa0;
     const FReg f_beta = fa1;
     const FReg f_zero = fa2;
     const FReg f_one = fa3;
+    const FReg f_tmp0 = fa4;
+    const FReg f_tmp1 = fa5;
 
     // Reg layout (widen-narrow at SEW=e32 LMUL=m4 compute):
-    //   v_in_f16  (m2, regs 2-3)   ← f16 load
-    //   v_src     (m4, regs 4-7)   ← widened f32 input
-    //   v_tmp     (m4, regs 8-11)  ← scratch
-    //   v_dst     (m4, regs 12-15) ← compute output
-    //   v_out_f16 (m2, regs 16-17) ← narrow store buffer
+    //   v_in_f16  (m2, regs 2-3)    <- f16 load
+    //   v_src     (m4, regs 4-7)    <- widened f32 input
+    //   v_tmp0    (m4, regs 8-11)   <- scratch
+    //   v_dst     (m4, regs 12-15)  <- compute output
+    //   v_tmp1    (m4, regs 16-19)  <- scratch
+    //   v_tmp2    (m4, regs 20-23)  <- scratch
+    //   v_tmp3    (m4, regs 24-27)  <- scratch
+    //   v_out_f16 (m2, regs 28-29)  <- narrow store buffer
     const VReg v_in_f16(2);
     const VReg v_src(4);
-    const VReg v_tmp(8);
+    const VReg v_tmp0(8);
     const VReg v_dst(12);
-    const VReg v_out_f16(16);
+    const VReg v_tmp1(16);
+    const VReg v_tmp2(20);
+    const VReg v_tmp3(24);
+    const VReg v_out_f16(28);
+
+    const eltwise_aux_regs_t regs {v_tmp0, v_tmp1, v_tmp2, v_tmp3, f_alpha,
+            f_beta, f_zero, f_one, f_tmp0, f_tmp1, t2, t3};
 
     ld(reg_src, reg_param, 0);
     ld(reg_dst, reg_param, 8);
@@ -327,26 +384,24 @@ void jit_rvv_eltwise_fwd_kernel_f16_t::generate() {
     flw(f_alpha, reg_param, 24);
     flw(f_beta, reg_param, 28);
     fmv_w_x(f_zero, x0);
-    li(reg_tmp, 0x3f800000);
-    fmv_w_x(f_one, reg_tmp);
+    li(regs.tmp_reg0, 0x3f800000);
+    fmv_w_x(f_one, regs.tmp_reg0);
 
     Label loop, done;
     L(loop);
     beqz(reg_len, done);
     // Three vsetvli phases. vfwcvt reads SEW as the source narrow width;
-    // vfncvt reads SEW as the *destination* narrow width — opposite
-    // convention. The compute runs at the wide f32 SEW. VLMAX matches at
-    // e16/m2 and e32/m4 for VLEN >= 64, so reg_vl is preserved.
+    // vfncvt reads SEW as the destination narrow width. The compute runs at
+    // e32/m4, and VLMAX matches e16/m2 for VLEN >= 64.
     vsetvli(reg_vl, reg_len, SEW::e16, LMUL::m2);
     vle16_v(v_in_f16, reg_src);
     vfwcvt_f_f_v(v_src, v_in_f16);
     vsetvli(reg_vl, reg_vl, SEW::e32, LMUL::m4);
-    compute_vector(v_dst, v_src, v_tmp, f_alpha, f_beta, f_zero, f_one);
+    compute_vector(regs, v_dst, v_src);
     vsetvli(reg_vl, reg_vl, SEW::e16, LMUL::m2);
     vfncvt_f_f_w(v_out_f16, v_dst);
     vse16_v(v_out_f16, reg_dst);
 
-    // 2 bytes per f16 element.
     slli(reg_bytes, reg_vl, 1);
     add(reg_src, reg_src, reg_bytes);
     add(reg_dst, reg_dst, reg_bytes);

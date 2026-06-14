@@ -101,24 +101,46 @@ void compute_softmax_f16_rvv(const dnnl::impl::float16_t *src,
         float val = (float)src[i];
         if (val > max_val) max_val = val;
     }
+    const bool max_is_pos_inf = max_val == INFINITY;
+    if (len == 1 && isfinite((float)src[0])) {
+        dst[0] = is_logsoftmax ? 0.f : 1.f;
+        return;
+    }
 
     if (is_logsoftmax) {
-        float *tmp_dst = new float[len];
+        if (max_is_pos_inf) {
+            float sum_exp = 0.f;
+            for (dim_t i = 0; i < len; ++i)
+                sum_exp += expf((float)src[i] - max_val);
+            const float log_sum = logf(sum_exp);
+            for (dim_t i = 0; i < len; ++i)
+                dst[i] = (float)src[i] - max_val - log_sum;
+            return;
+        }
+
+        float *scratchpad = new float[len];
         float sum_exp = 0.f;
 
-        jit_rvv_softmax_f16_exp_sub_sum(src, tmp_dst, len, max_val, &sum_exp);
+        jit_rvv_softmax_f16_exp_sub_sum(
+                src, scratchpad, len, max_val, &sum_exp);
         const float log_sum = logf(sum_exp);
 
         const float sub = max_val + log_sum;
         jit_rvv_softmax_f16_affine_from_f16(src, dst, len, sub, 1.0f);
-        delete[] tmp_dst;
+        delete[] scratchpad;
     } else {
         float *tmp_dst = new float[len];
         float sum_exp = 0.f;
         const bool all_minus_inf
                 = is_softmax_inf_as_zero && (max_val == -INFINITY);
 
-        if (all_minus_inf) {
+        if (max_is_pos_inf) {
+            for (dim_t i = 0; i < len; ++i) {
+                float e = expf((float)src[i] - max_val);
+                tmp_dst[i] = e;
+                sum_exp += e;
+            }
+        } else if (all_minus_inf) {
             for (dim_t i = 0; i < len; ++i)
                 tmp_dst[i] = 0.f;
         } else {
